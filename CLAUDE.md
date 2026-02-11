@@ -14,7 +14,13 @@ Single bash script. No build system, no dependencies beyond `apcupsd`/`apcaccess
 
 **CSS classes emitted:** `online`, `on-battery`, `warning`, `critical` — these map to Waybar styling and are driven by UPS status and battery charge level.
 
-**Status handling:** The script handles `ONLINE`, `ONBATT`, `LOWBATT`, `OVERLOAD`, `REPLACEBATT`, `NOBATT`, `COMMLOST`, and unknown states. Each maps to an icon set (charging vs discharging Nerd Font battery icons, indexed by charge level in 10% steps) and a CSS class.
+**Status handling:** The apcupsd STATUS field can contain multiple space-separated flags (e.g., `ONLINE OVERLOAD`). The script uses priority-based pattern matching to handle these compound statuses:
+
+1. **Critical states** (highest priority): `SHUTTING DOWN`, `COMMLOST`, `LOWBATT`, `REPLACEBATT`, `NOBATT`, `OVERLOAD`
+2. **Power states**: `ONBATT` (discharging), `ONLINE` (charging)
+3. **Informational flags** (shown in tooltip): `CAL`, `TRIM`, `BOOST`, `SLAVE`, `SLAVEDOWN`
+
+Each state maps to an icon set (charging vs discharging Nerd Font battery icons, indexed by charge level in 10% steps) and a CSS class.
 
 ## Testing
 
