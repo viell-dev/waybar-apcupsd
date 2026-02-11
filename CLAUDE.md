@@ -39,3 +39,7 @@ No test framework. To verify the script manually:
 - Polls every 60s by default (`interval: 60`)
 - Supports signal-based refresh: `pkill -SIGRTMIN+9 waybar`
 - Event-driven updates via apcupsd scripts (`onbattery`, `offbattery`, `commfailure`, `commok`, `changeme`)
+
+## APCUPSd Source Code
+
+The git ignored directory `./apcupsd` ought to contain the source code of APCUPSd. It can also be downloaded from: [SourceForge](https://sourceforge.net/projects/apcupsd/files/apcupsd%20-%20Stable/3.14.14/). The latest official version is 3.14.14 from 2016-05-31. It's basically abandonware at this point, even the homepage just points at their SourceForge page for the package.
