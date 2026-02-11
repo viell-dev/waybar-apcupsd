@@ -58,19 +58,56 @@ LINEV=${LINEV%% *}
 CHARGE_INT=${BCHARGE%%.*}
 CHARGE_INT=${CHARGE_INT:-0}
 
-# --- Determine alt, class, and warning message ----------------------------
+# --- Determine state from compound STATUS field --------------------------
+# STATUS can contain multiple space-separated flags (e.g., "ONLINE OVERLOAD").
+# We check in priority order, with critical states first.
 
 CLASS="online"
 ALT=""
 WARNING=""
 FALLBACK_TEXT=""
+INFO_FLAGS=""
 
-case "$STATUS" in
-    ONLINE)
-        ALT="charging"
-        CLASS="online"
-        ;;
-    ONBATT)
+# Collect informational flags for tooltip (these don't change primary state)
+[[ "$STATUS" == *"CAL"* ]] && INFO_FLAGS="${INFO_FLAGS}Calibration in progress. "
+[[ "$STATUS" == *"TRIM"* ]] && INFO_FLAGS="${INFO_FLAGS}Voltage trim active. "
+[[ "$STATUS" == *"BOOST"* ]] && INFO_FLAGS="${INFO_FLAGS}Voltage boost active. "
+[[ "$STATUS" == *"SLAVE"* && "$STATUS" != *"SLAVEDOWN"* ]] && INFO_FLAGS="${INFO_FLAGS}Running as slave. "
+[[ "$STATUS" == *"SLAVEDOWN"* ]] && INFO_FLAGS="${INFO_FLAGS}Slave not responding. "
+
+# Critical states (highest priority) - these override power state detection
+if [[ "$STATUS" == "SHUTTING DOWN" ]]; then
+    ALT="alert"
+    CLASS="critical"
+    WARNING="SHUTTING DOWN"
+    FALLBACK_TEXT="$TEXT_ALERT"
+elif [[ "$STATUS" == *"COMMLOST"* ]]; then
+    ALT="unknown"
+    CLASS="critical"
+    WARNING="COMMUNICATION LOST"
+    FALLBACK_TEXT="$TEXT_UNKNOWN"
+elif [[ "$STATUS" == *"LOWBATT"* ]]; then
+    ALT="alert"
+    CLASS="critical"
+    WARNING="LOW BATTERY - Shutdown imminent"
+elif [[ "$STATUS" == *"REPLACEBATT"* ]]; then
+    ALT="alert"
+    CLASS="critical"
+    WARNING="REPLACE BATTERY"
+elif [[ "$STATUS" == *"NOBATT"* ]]; then
+    ALT="alert"
+    CLASS="critical"
+    WARNING="NO BATTERY DETECTED"
+    FALLBACK_TEXT="$TEXT_ALERT"
+elif [[ "$STATUS" == *"OVERLOAD"* ]]; then
+    ALT="alert"
+    CLASS="critical"
+    WARNING="UPS OVERLOADED"
+fi
+
+# If no critical state set ALT, determine primary power state
+if [[ -z "$ALT" ]]; then
+    if [[ "$STATUS" == *"ONBATT"* ]]; then
         ALT="discharging"
         if (( CHARGE_INT <= 20 )); then
             CLASS="critical"
@@ -80,42 +117,18 @@ case "$STATUS" in
         else
             CLASS="on-battery"
         fi
-        ;;
-    LOWBATT)
-        ALT="alert"
-        CLASS="critical"
-        WARNING="LOW BATTERY - Shutdown imminent"
-        ;;
-    OVERLOAD)
-        ALT="alert"
-        CLASS="critical"
-        WARNING="UPS OVERLOADED"
-        ;;
-    REPLACEBATT)
-        ALT="alert"
-        CLASS="critical"
-        WARNING="REPLACE BATTERY"
-        ;;
-    NOBATT)
-        ALT="alert"
-        CLASS="critical"
-        WARNING="NO BATTERY DETECTED"
-        FALLBACK_TEXT="$TEXT_ALERT"
-        ;;
-    COMMLOST)
-        ALT="unknown"
-        CLASS="critical"
-        WARNING="COMMUNICATION LOST"
-        FALLBACK_TEXT="$TEXT_UNKNOWN"
-        ;;
-    *)
+    elif [[ "$STATUS" == *"ONLINE"* ]]; then
+        ALT="charging"
+        CLASS="online"
+    else
+        # Truly unknown status
         ALT="unknown"
         CLASS="warning"
         WARNING="Unknown status: $STATUS"
         FALLBACK_TEXT="$TEXT_UNKNOWN"
         [[ "$DEBUG" -eq 1 ]] && debug_log
-        ;;
-esac
+    fi
+fi
 
 # --- Debug logging (level 2: always) --------------------------------------
 [[ "$DEBUG" -eq 2 ]] && debug_log
@@ -125,8 +138,10 @@ esac
 TEXT="${FALLBACK_TEXT:-${CHARGE_INT}%}"
 
 # Tooltip with full details
+# Note: ⚠ is U+26A0 (Warning Sign), ℹ is U+2139 (Information Source)
 TOOLTIP=""
 [[ -n "$WARNING" ]] && TOOLTIP="⚠ ${WARNING}\n"
+[[ -n "$INFO_FLAGS" ]] && TOOLTIP="${TOOLTIP}ℹ ${INFO_FLAGS}\n"
 TOOLTIP="${TOOLTIP}Status: ${STATUS}\nBattery: ${BCHARGE}%\nLoad: ${LOADPCT}%\nRuntime: ${TIMELEFT} min\nLine: ${LINEV} V"
 
 # Escape quotes for JSON

@@ -180,15 +180,37 @@ The script outputs JSON with these fields:
 | `warning` | On battery, charge 20-50% |
 | `critical` | On battery charge < 20%, or any error state |
 
-### Error States
+### Status Flags
 
-| STATUS | Meaning |
+The apcupsd STATUS field can contain multiple space-separated flags (e.g., `ONLINE OVERLOAD`). The script uses priority-based pattern matching to handle compound statuses correctly.
+
+**Critical states** (highest priority):
+
+| Flag | Meaning |
 |---|---|
+| SHUTTING DOWN | System is shutting down |
+| COMMLOST | Lost communication with UPS |
 | LOWBATT | Low battery, shutdown imminent |
-| OVERLOAD | UPS load exceeds capacity |
 | REPLACEBATT | Battery needs replacement |
 | NOBATT | No battery detected |
-| COMMLOST | Lost communication with UPS |
+| OVERLOAD | UPS load exceeds capacity |
+
+**Power states** (checked if no critical state):
+
+| Flag | Meaning |
+|---|---|
+| ONBATT | Running on battery power |
+| ONLINE | Running on mains power |
+
+**Informational flags** (shown in tooltip):
+
+| Flag | Meaning |
+|---|---|
+| CAL | Battery calibration in progress |
+| TRIM | Over-voltage correction active |
+| BOOST | Under-voltage correction active |
+| SLAVE | Running as network slave |
+| SLAVEDOWN | Slave not responding |
 
 ### Tooltip
 
@@ -202,7 +224,7 @@ Runtime: 8.3 min
 Line: 228.0 V
 ```
 
-Warning messages appear at the top of the tooltip when applicable.
+Warning messages (⚠) and informational messages (ℹ) appear at the top of the tooltip when applicable.
 
 ## Troubleshooting
 
