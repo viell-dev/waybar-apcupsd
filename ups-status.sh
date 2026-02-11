@@ -7,6 +7,21 @@
 
 set -euo pipefail
 
+# --- Debug settings -------------------------------------------------------
+# 0 = off, 1 = log on unknown/*-branch, 2 = log always
+DEBUG=${DEBUG:-0}
+DEBUG_LOG="${DEBUG_LOG:-/tmp/waybar-apcupsd.log}"
+
+debug_log() {
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    {
+        echo "=== $timestamp ==="
+        echo "$RAW"
+        echo ""
+    } >> "$DEBUG_LOG"
+}
+
 # --- Fallback text for states without a valid charge ----------------------
 TEXT_ERROR="Error"
 TEXT_ALERT="Alert"
@@ -96,8 +111,12 @@ case "$STATUS" in
         CLASS="warning"
         WARNING="Unknown status: $STATUS"
         FALLBACK_TEXT="$TEXT_UNKNOWN"
+        [[ "$DEBUG" -ge 1 ]] && debug_log
         ;;
 esac
+
+# --- Debug logging (level 2: always) --------------------------------------
+[[ "$DEBUG" -ge 2 ]] && debug_log
 
 # --- Build output ---------------------------------------------------------
 
