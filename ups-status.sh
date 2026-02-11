@@ -10,6 +10,8 @@ set -euo pipefail
 # --- Debug settings -------------------------------------------------------
 # 0 = off, 1 = log on unknown/*-branch, 2 = log always
 DEBUG=${DEBUG:-0}
+# Normalize non-integers to 0
+[[ "$DEBUG" =~ ^[0-9]+$ ]] || DEBUG=0
 DEBUG_LOG="${DEBUG_LOG:-/tmp/waybar-apcupsd.log}"
 
 debug_log() {
@@ -111,12 +113,12 @@ case "$STATUS" in
         CLASS="warning"
         WARNING="Unknown status: $STATUS"
         FALLBACK_TEXT="$TEXT_UNKNOWN"
-        [[ "$DEBUG" -ge 1 ]] && debug_log
+        [[ "$DEBUG" -eq 1 ]] && debug_log
         ;;
 esac
 
 # --- Debug logging (level 2: always) --------------------------------------
-[[ "$DEBUG" -ge 2 ]] && debug_log
+[[ "$DEBUG" -eq 2 ]] && debug_log
 
 # --- Build output ---------------------------------------------------------
 
