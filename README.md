@@ -1,6 +1,7 @@
 # waybar-apcupsd
 
-[![Version](https://img.shields.io/badge/version-0.1.0-blue)](https://github.com/viell-dev/waybar-apcupsd/releases)
+[![Version](https://img.shields.io/github/v/release/viell-dev/waybar-apcupsd)](https://github.com/viell-dev/waybar-apcupsd/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE-MIT)
 
 A custom [Waybar](https://github.com/Alexays/Waybar) module for monitoring an APC UPS via [apcupsd](http://www.apcupsd.org/). Displays battery-style icons with color-coded status.
 
