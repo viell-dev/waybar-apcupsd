@@ -16,9 +16,10 @@ Single bash script. No build system, no dependencies beyond `apcupsd`/`apcaccess
 
 **Status handling:** The apcupsd STATUS field can contain multiple space-separated flags (e.g., `ONLINE OVERLOAD`). The script uses priority-based pattern matching to handle these compound statuses:
 
-1. **Critical states** (highest priority): `SHUTTING DOWN`, `COMMLOST`, `LOWBATT`, `REPLACEBATT`, `NOBATT`, `OVERLOAD`
-2. **Power states**: `ONBATT` (discharging), `ONLINE` (charging)
-3. **Informational flags** (shown in tooltip): `CAL`, `TRIM`, `BOOST`, `SLAVE`, `SLAVEDOWN`
+1. **Critical states** (highest priority): `SHUTTING DOWN`, `LOWBATT`, `REPLACEBATT`, `NOBATT` — UPS hardware failing or shutdown imminent
+2. **Warning states**: `COMMLOST`, `OVERLOAD` — attention needed, but UPS hardware is healthy
+3. **Power states**: `ONBATT` (discharging), `ONLINE` (charging)
+4. **Informational flags** (shown in tooltip): `CAL`, `TRIM`, `BOOST`, `SLAVE`, `SLAVEDOWN`
 
 Each state maps to an icon set (charging vs discharging Nerd Font battery icons, indexed by charge level in 10% steps) and a CSS class.
 

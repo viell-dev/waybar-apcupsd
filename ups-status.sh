@@ -83,7 +83,7 @@ if [[ "$STATUS" == "SHUTTING DOWN" ]]; then
     FALLBACK_TEXT="$TEXT_ALERT"
 elif [[ "$STATUS" == *"COMMLOST"* ]]; then
     ALT="unknown"
-    CLASS="critical"
+    CLASS="warning"
     WARNING="COMMUNICATION LOST"
     FALLBACK_TEXT="$TEXT_UNKNOWN"
 elif [[ "$STATUS" == *"LOWBATT"* ]]; then
@@ -101,7 +101,7 @@ elif [[ "$STATUS" == *"NOBATT"* ]]; then
     FALLBACK_TEXT="$TEXT_ALERT"
 elif [[ "$STATUS" == *"OVERLOAD"* ]]; then
     ALT="alert"
-    CLASS="critical"
+    CLASS="warning"
     WARNING="UPS OVERLOADED"
 fi
 
