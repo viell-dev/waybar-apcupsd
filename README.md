@@ -99,7 +99,7 @@ Icons are configured entirely in your Waybar config via [`format-icons`](https:/
 |---|---|---|
 | `charging` | UPS online / on mains | Array — picked by percentage (0-100%) |
 | `discharging` | UPS on battery | Array — picked by percentage (0-100%) |
-| `alert` | Error states (LOWBATT, OVERLOAD, etc.) | Single icon |
+| `alert` | Critical/warning states (LOWBATT, OVERLOAD, etc.) | Single icon |
 | `unknown` | Communication lost / unknown status | Single icon |
 
 ### Using different icons
@@ -178,25 +178,30 @@ The script outputs JSON with these fields:
 |---|---|
 | `online` | On mains power |
 | `on-battery` | On battery, charge > 50% |
-| `warning` | On battery, charge 20-50% |
-| `critical` | On battery charge < 20%, or any error state |
+| `warning` | On battery charge 20-50%; or COMMLOST / OVERLOAD |
+| `critical` | On battery charge < 20%; or LOWBATT, REPLACEBATT, NOBATT, SHUTTING DOWN |
 
 ### Status Flags
 
 The apcupsd STATUS field can contain multiple space-separated flags (e.g., `ONLINE OVERLOAD`). The script uses priority-based pattern matching to handle compound statuses correctly.
 
-**Critical states** (highest priority):
+**Critical states** (highest priority — UPS hardware failing or shutdown imminent):
 
 | Flag | Meaning |
 |---|---|
 | SHUTTING DOWN | System is shutting down |
-| COMMLOST | Lost communication with UPS |
 | LOWBATT | Low battery, shutdown imminent |
 | REPLACEBATT | Battery needs replacement |
 | NOBATT | No battery detected |
-| OVERLOAD | UPS load exceeds capacity |
 
-**Power states** (checked if no critical state):
+**Warning states** (UPS hardware healthy, but attention needed):
+
+| Flag | Meaning |
+|---|---|
+| COMMLOST | Lost communication with UPS device (cable/driver issue) |
+| OVERLOAD | UPS load exceeds rated capacity |
+
+**Power states** (checked if no critical or warning state):
 
 | Flag | Meaning |
 |---|---|
