@@ -75,7 +75,7 @@ INFO_FLAGS=""
 [[ "$STATUS" == *"SLAVE"* && "$STATUS" != *"SLAVEDOWN"* ]] && INFO_FLAGS="${INFO_FLAGS}Running as slave. "
 [[ "$STATUS" == *"SLAVEDOWN"* ]] && INFO_FLAGS="${INFO_FLAGS}Slave not responding. "
 
-# Critical states (highest priority) - these override power state detection
+# Priority states (critical: SHUTTING DOWN, LOWBATT, REPLACEBATT, NOBATT; warning: COMMLOST, OVERLOAD)
 if [[ "$STATUS" == "SHUTTING DOWN" ]]; then
     ALT="alert"
     CLASS="critical"
