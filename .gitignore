@@ -1,2 +1,6 @@
 # Source files
 apcupsd/
+
+# Python test artifacts
+__pycache__/
+*.pyc

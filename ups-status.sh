@@ -56,78 +56,205 @@ LINEV=${LINEV%% *}
 
 # Integer charge for percentage output
 CHARGE_INT=${BCHARGE%%.*}
-CHARGE_INT=${CHARGE_INT:-0}
+CHARGE_INT=${CHARGE_INT//[^0-9]/}
+if [[ -n "$CHARGE_INT" ]]; then
+    CHARGE_INT=$((10#$CHARGE_INT))
+else
+    CHARGE_INT=0
+fi
 
 # --- Determine state from compound STATUS field --------------------------
 # STATUS can contain multiple space-separated flags (e.g., "ONLINE OVERLOAD").
-# We check in priority order, with critical states first.
+# Resolve compound states in three steps:
+#   1. Determine the primary power context (ONLINE / ONBATT / unknown)
+#   2. Apply context-aware warning and critical modifiers
+#   3. Keep informational flags in the tooltip only
+
+STATUS_NORMALIZED=$(awk '{$1=$1; print}' <<< "$STATUS")
+
+declare -A STATUS_FLAGS=()
+for token in $STATUS_NORMALIZED; do
+    STATUS_FLAGS["$token"]=1
+done
+
+has_flag() {
+    [[ -n "${STATUS_FLAGS[$1]:-}" ]]
+}
+
+severity_rank() {
+    case "$1" in
+        online) echo 0 ;;
+        on-battery) echo 1 ;;
+        warning) echo 2 ;;
+        critical) echo 3 ;;
+        *) echo 0 ;;
+    esac
+}
+
+set_class_max() {
+    local candidate=$1
+
+    if (( $(severity_rank "$candidate") > $(severity_rank "$CLASS") )); then
+        CLASS=$candidate
+    fi
+}
+
+alt_rank() {
+    case "$1" in
+        "") echo 0 ;;
+        unknown) echo 1 ;;
+        alert) echo 2 ;;
+        *) echo 0 ;;
+    esac
+}
+
+set_alt_override() {
+    local candidate=$1
+
+    if (( $(alt_rank "$candidate") > $(alt_rank "$ALT_OVERRIDE") )); then
+        ALT_OVERRIDE=$candidate
+    fi
+}
 
 CLASS="online"
-ALT=""
-WARNING=""
+ALT="unknown"
+ALT_OVERRIDE=""
 FALLBACK_TEXT=""
-INFO_FLAGS=""
+WARNINGS=()
+INFO_MESSAGES=()
+UNKNOWN_TOKENS=()
+POWER_STATE="unknown"
+HAS_KNOWN_FLAG=0
+IS_SHUTTING_DOWN=0
 
-# Collect informational flags for tooltip (these don't change primary state)
-[[ "$STATUS" == *"CAL"* ]] && INFO_FLAGS="${INFO_FLAGS}Calibration in progress. "
-[[ "$STATUS" == *"TRIM"* ]] && INFO_FLAGS="${INFO_FLAGS}Voltage trim active. "
-[[ "$STATUS" == *"BOOST"* ]] && INFO_FLAGS="${INFO_FLAGS}Voltage boost active. "
-[[ "$STATUS" == *"SLAVE"* && "$STATUS" != *"SLAVEDOWN"* ]] && INFO_FLAGS="${INFO_FLAGS}Running as slave. "
-[[ "$STATUS" == *"SLAVEDOWN"* ]] && INFO_FLAGS="${INFO_FLAGS}Slave not responding. "
-
-# Priority states (critical: SHUTTING DOWN, LOWBATT, REPLACEBATT, NOBATT; warning: COMMLOST, OVERLOAD)
-if [[ "$STATUS" == "SHUTTING DOWN" ]]; then
-    ALT="alert"
-    CLASS="critical"
-    WARNING="SHUTTING DOWN"
-    FALLBACK_TEXT="$TEXT_ALERT"
-elif [[ "$STATUS" == *"COMMLOST"* ]]; then
-    ALT="unknown"
-    CLASS="warning"
-    WARNING="COMMUNICATION LOST"
-    FALLBACK_TEXT="$TEXT_UNKNOWN"
-elif [[ "$STATUS" == *"LOWBATT"* ]]; then
-    ALT="alert"
-    CLASS="critical"
-    WARNING="LOW BATTERY - Shutdown imminent"
-elif [[ "$STATUS" == *"REPLACEBATT"* ]]; then
-    ALT="alert"
-    CLASS="critical"
-    WARNING="REPLACE BATTERY"
-elif [[ "$STATUS" == *"NOBATT"* ]]; then
-    ALT="alert"
-    CLASS="critical"
-    WARNING="NO BATTERY DETECTED"
-    FALLBACK_TEXT="$TEXT_ALERT"
-elif [[ "$STATUS" == *"OVERLOAD"* ]]; then
-    ALT="alert"
-    CLASS="warning"
-    WARNING="UPS OVERLOADED"
+if [[ "$STATUS_NORMALIZED" == *"SHUTTING DOWN"* ]]; then
+    IS_SHUTTING_DOWN=1
+    HAS_KNOWN_FLAG=1
 fi
 
-# If no critical state set ALT, determine primary power state
-if [[ -z "$ALT" ]]; then
-    if [[ "$STATUS" == *"ONBATT"* ]]; then
-        ALT="discharging"
-        if (( CHARGE_INT <= 20 )); then
-            CLASS="critical"
-            WARNING="LOW BATTERY"
-        elif (( CHARGE_INT <= 50 )); then
-            CLASS="warning"
-        else
-            CLASS="on-battery"
+for token in $STATUS_NORMALIZED; do
+    case "$token" in
+        ONLINE|ONBATT|LOWBATT|REPLACEBATT|NOBATT|COMMLOST|OVERLOAD|CAL|TRIM|BOOST|SLAVE|SLAVEDOWN)
+            HAS_KNOWN_FLAG=1
+            ;;
+        SHUTTING|DOWN)
+            if (( IS_SHUTTING_DOWN )); then
+                :
+            else
+                UNKNOWN_TOKENS+=("$token")
+            fi
+            ;;
+        "")
+            ;;
+        *)
+            UNKNOWN_TOKENS+=("$token")
+            ;;
+    esac
+done
+
+# Collect informational flags for tooltip (these don't change primary state)
+has_flag CAL && INFO_MESSAGES+=("Calibration in progress.")
+has_flag TRIM && INFO_MESSAGES+=("Voltage trim active.")
+has_flag BOOST && INFO_MESSAGES+=("Voltage boost active.")
+if has_flag SLAVEDOWN; then
+    INFO_MESSAGES+=("Slave not responding.")
+elif has_flag SLAVE; then
+    INFO_MESSAGES+=("Running as slave.")
+fi
+
+# Determine the primary power context first.
+if has_flag ONBATT; then
+    POWER_STATE="on-battery"
+    ALT="discharging"
+    if (( CHARGE_INT <= 20 )); then
+        CLASS="critical"
+        if ! has_flag LOWBATT; then
+            WARNINGS+=("LOW BATTERY")
         fi
-    elif [[ "$STATUS" == *"ONLINE"* ]]; then
-        ALT="charging"
-        CLASS="online"
-    else
-        # Truly unknown status
-        ALT="unknown"
+    elif (( CHARGE_INT <= 50 )); then
         CLASS="warning"
-        WARNING="Unknown status: $STATUS"
-        FALLBACK_TEXT="$TEXT_UNKNOWN"
-        [[ "$DEBUG" -eq 1 ]] && debug_log
+    else
+        CLASS="on-battery"
     fi
+elif has_flag ONLINE; then
+    POWER_STATE="online"
+    ALT="charging"
+    CLASS="online"
+else
+    CLASS="warning"
+    FALLBACK_TEXT="$TEXT_UNKNOWN"
+fi
+
+# Apply context-aware flags on top of the power state.
+if (( IS_SHUTTING_DOWN )); then
+    set_class_max critical
+    set_alt_override alert
+    FALLBACK_TEXT="$TEXT_ALERT"
+    WARNINGS+=("SHUTTING DOWN")
+fi
+
+if has_flag COMMLOST; then
+    set_class_max warning
+    set_alt_override unknown
+    FALLBACK_TEXT="$TEXT_UNKNOWN"
+    WARNINGS+=("COMMUNICATION LOST")
+fi
+
+if has_flag LOWBATT; then
+    case "$POWER_STATE" in
+        online)
+            set_class_max warning
+            WARNINGS+=("Battery low, currently on mains power")
+            ;;
+        on-battery)
+            set_class_max critical
+            WARNINGS+=("LOW BATTERY - Shutdown imminent")
+            ;;
+        *)
+            set_class_max critical
+            set_alt_override alert
+            FALLBACK_TEXT="$TEXT_ALERT"
+            WARNINGS+=("LOW BATTERY - Power state unknown")
+            ;;
+    esac
+fi
+
+if has_flag REPLACEBATT; then
+    set_class_max warning
+    if [[ "$POWER_STATE" == "unknown" ]]; then
+        set_alt_override alert
+        FALLBACK_TEXT="$TEXT_ALERT"
+    fi
+    WARNINGS+=("REPLACE BATTERY")
+fi
+
+if has_flag NOBATT; then
+    set_class_max critical
+    set_alt_override alert
+    FALLBACK_TEXT="$TEXT_ALERT"
+    WARNINGS+=("NO BATTERY DETECTED")
+fi
+
+if has_flag OVERLOAD; then
+    set_class_max warning
+    if [[ "$POWER_STATE" == "unknown" ]]; then
+        set_alt_override alert
+        FALLBACK_TEXT="$TEXT_ALERT"
+    fi
+    WARNINGS+=("UPS OVERLOADED")
+fi
+
+if (( ${#UNKNOWN_TOKENS[@]} > 0 )); then
+    set_class_max warning
+    WARNINGS+=("Unknown status flag(s): ${UNKNOWN_TOKENS[*]}")
+    [[ "$DEBUG" -eq 1 ]] && debug_log
+elif [[ "$POWER_STATE" == "unknown" && "$HAS_KNOWN_FLAG" -eq 0 ]]; then
+    WARNINGS+=("Unknown status: ${STATUS:-<empty>}")
+    [[ "$DEBUG" -eq 1 ]] && debug_log
+fi
+
+if [[ -n "$ALT_OVERRIDE" ]]; then
+    ALT=$ALT_OVERRIDE
 fi
 
 # --- Debug logging (level 2: always) --------------------------------------
@@ -140,8 +267,12 @@ TEXT="${FALLBACK_TEXT:-${CHARGE_INT}%}"
 # Tooltip with full details
 # Note: ⚠ is U+26A0 (Warning Sign), ℹ is U+2139 (Information Source)
 TOOLTIP=""
-[[ -n "$WARNING" ]] && TOOLTIP="⚠ ${WARNING}\n"
-[[ -n "$INFO_FLAGS" ]] && TOOLTIP="${TOOLTIP}ℹ ${INFO_FLAGS}\n"
+for warning in "${WARNINGS[@]}"; do
+    TOOLTIP="${TOOLTIP}⚠ ${warning}\n"
+done
+for info in "${INFO_MESSAGES[@]}"; do
+    TOOLTIP="${TOOLTIP}ℹ ${info}\n"
+done
 TOOLTIP="${TOOLTIP}Status: ${STATUS}\nBattery: ${BCHARGE}%\nLoad: ${LOADPCT}%\nRuntime: ${TIMELEFT} min\nLine: ${LINEV} V"
 
 # Escape quotes for JSON
