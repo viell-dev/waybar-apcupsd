@@ -19,11 +19,11 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Verify shell script syntax
-        run: bash -n ups-status.sh
+      - name: Install check tools
+        run: sudo apt-get update && sudo apt-get install -y just shellcheck
 
-      - name: Verify Python test syntax
-        run: python3 -m py_compile tests/test_ups_status.py
+      - name: Run lint checks
+        run: just lint
 
       - name: Run unit tests
-        run: python3 -m unittest discover -s tests -v
+        run: just test

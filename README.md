@@ -3,7 +3,7 @@
 [![Version](https://img.shields.io/github/v/release/viell-dev/waybar-apcupsd)](https://github.com/viell-dev/waybar-apcupsd/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE-MIT)
 
-A custom [Waybar](https://github.com/Alexays/Waybar) module for monitoring an APC UPS via [apcupsd](http://www.apcupsd.org/). Displays battery-style icons with color-coded status.
+A custom [Waybar](https://github.com/Alexays/Waybar) module for monitoring an APC UPS via [apcupsd](https://sourceforge.net/projects/apcupsd/). Displays battery-style icons with color-coded status.
 
 Release notes live in [CHANGELOG.md](CHANGELOG.md).
 
@@ -15,17 +15,21 @@ Release notes live in [CHANGELOG.md](CHANGELOG.md).
 Verify your UPS is communicating:
 
 ```bash
-apcaccess status
+apcaccess
 ```
 
 ## Installation
 
-### 1. Clone the repository
+### 1. Install the script
 
 ```bash
-git clone https://github.com/viell-dev/waybar-apcupsd.git
-chmod +x waybar-apcupsd/ups-status.sh
+cp ups-status.sh /path/to/ups-status.sh
+chmod +x /path/to/ups-status.sh
 ```
+
+Install the script wherever you keep Waybar helper scripts. You can copy
+`ups-status.sh` from a cloned repository or from a release archive. The examples
+below use `/path/to/ups-status.sh`; replace it with your chosen location.
 
 ### 2. Add the module to your Waybar config
 
@@ -35,11 +39,11 @@ In your Waybar config (e.g. `~/.config/waybar/config.jsonc`), add `"custom/ups"`
 "modules-right": ["custom/ups", ...],
 ```
 
-Then add the module definition, pointing `exec` at wherever you cloned the script:
+Then add the module definition, pointing `exec` at the installed script:
 
 ```jsonc
 "custom/ups": {
-  "exec": "/path/to/waybar-apcupsd/ups-status.sh",
+  "exec": "/path/to/ups-status.sh",
   "return-type": "json",
   "interval": 60,
   "signal": 9,
@@ -106,7 +110,10 @@ Icons are configured entirely in your Waybar config via [`format-icons`](https:/
 
 ### Using different icons
 
-Replace the icons in `format-icons` in your Waybar config. Arrays must have entries from low to high — Waybar picks the icon based on the `percentage` value.
+Replace the icons in `format-icons` in your Waybar config. Arrays must be
+ordered from low to high charge. Waybar maps the script's `percentage` value
+across however many entries you provide, so you can use a coarse set such as 5
+icons or a finer set such as 11 icons.
 
 ```jsonc
 "format-icons": {
@@ -118,19 +125,9 @@ Replace the icons in `format-icons` in your Waybar config. Arrays must have entr
 }
 ```
 
-### Using text instead of icons
-
-Set `format-icons` to text labels for a setup that doesn't require a Nerd Font:
-
-```jsonc
-"format": "{icon} {text}",
-"format-icons": {
-  "charging": "CHG",
-  "discharging": "BAT",
-  "alert": "ALT",
-  "unknown": "UNK"
-}
-```
+The icon strings can be plain text labels if you do not use a Nerd Font. Keep
+`charging` and `discharging` as arrays when you want Waybar to select by
+percentage.
 
 ### Hiding the icon
 
@@ -154,7 +151,8 @@ pkill -SIGRTMIN+9 waybar 2>/dev/null
 ```
 
 This sends a signal to Waybar to immediately re-run the UPS script. These are
-system files owned by root and may be overwritten on apcupsd package updates.
+root-owned, package-managed system files, so keep local changes in mind when
+updating the distro package.
 
 You can also trigger a manual refresh at any time:
 
@@ -168,20 +166,49 @@ The script outputs JSON with these fields:
 
 | Field | Description | Example |
 |---|---|---|
-| `text` | Battery percentage, or status text for errors | `"75%"` |
+| `text` | Battery percentage, or fallback status text | `"75%"` |
 | `alt` | State name for icon selection | `"charging"` |
 | `tooltip` | Detailed UPS info | `"Status: ONLINE\n..."` |
 | `class` | CSS class for styling | `"online"` |
 | `percentage` | Battery charge (0-100) | `100` |
+
+Numeric `BCHARGE` values are clamped into the `0-100` range before output, so
+minor over-100 readings from UPS rounding are treated as full charge. If
+`BCHARGE` is missing or nonnumeric, the script reports `text: "Unknown"` and
+`percentage: 0`, but it does not apply charge-threshold warning or critical
+classes from that placeholder value.
 
 ### CSS Classes
 
 | CSS Class | Condition |
 |---|---|
 | `online` | On mains power |
-| `on-battery` | On battery, charge > 50% |
-| `warning` | On battery charge 20-50%; communication or hardware warnings; `ONLINE LOWBATT` |
-| `critical` | On battery charge < 20%; `ONBATT LOWBATT`; `NOBATT`; `SHUTTING DOWN` |
+| `on-battery` | On battery, above configured warning/critical charge thresholds |
+| `warning` | On battery at or below `WARNING_CHARGE`; `COMMLOST`; hardware warnings; `ONLINE LOWBATT` |
+| `critical` | `SHUTTING DOWN`; `NOBATT`; `ONBATT LOWBATT`; `apcaccess` failure; empty `apcaccess` output; on battery at or below configured `CRITICAL_CHARGE` |
+
+### Charge Thresholds
+
+Charge-level CSS classes are configurable with environment variables:
+
+| Variable | Default | Meaning |
+|---|---:|---|
+| `WARNING_CHARGE` | `20` | On-battery charge at or below this percentage becomes `warning`; use an integer from `0` to `100`; `0` disables the warning threshold |
+| `CRITICAL_CHARGE` | `0` | On-battery charge at or below this percentage becomes `critical`; use an integer from `0` to `100`; `0` disables the critical threshold |
+
+If both thresholds are enabled, `CRITICAL_CHARGE` must be lower than
+`WARNING_CHARGE`. Invalid threshold config emits a critical `Error` payload so
+the Waybar module makes the misconfiguration visible.
+
+Examples:
+
+```jsonc
+// Warn at 30%, never make charge level alone critical
+"exec": "WARNING_CHARGE=30 /path/to/ups-status.sh"
+
+// Use only a critical threshold
+"exec": "WARNING_CHARGE=0 CRITICAL_CHARGE=20 /path/to/ups-status.sh"
+```
 
 ### Status Flags
 
@@ -189,7 +216,7 @@ The apcupsd STATUS field can contain multiple space-separated flags (e.g., `ONLI
 
 `LOWBATT` is context-sensitive:
 
-- `ONBATT LOWBATT` stays critical because shutdown is imminent
+- `ONBATT LOWBATT` is critical because apcupsd treats the low-battery bit as a shutdown trigger while on battery
 - `ONLINE LOWBATT` is downgraded to a warning and keeps the normal charging icon
 
 **Critical states** (shutdown imminent or battery missing):
@@ -230,6 +257,13 @@ The apcupsd STATUS field can contain multiple space-separated flags (e.g., `ONLI
 | SLAVE | Running as network slave |
 | SLAVEDOWN | Slave not responding |
 
+`COMMLOST` is treated as a warning. Some UPS models briefly stop reporting
+status during self-tests, so `COMMLOST` is treated as a temporary communication
+warning rather than a critical alert. If `apcaccess` itself exits with an error,
+or exits successfully without returning status data, the script reports a
+critical `Error` because that usually means apcupsd is not running, the local
+query path is misconfigured, or apcupsd returned an unexpected result.
+
 ### Tooltip
 
 Hovering shows detailed info:
@@ -251,26 +285,14 @@ Warning messages (⚠) and informational messages (ℹ) appear at the top of the
 systemctl status apcupsd
 
 # Test apcaccess directly
-apcaccess status
+apcaccess
 
 # Test the script output (should print valid JSON)
-/path/to/waybar-apcupsd/ups-status.sh
+/path/to/ups-status.sh
 
 # Validate JSON
-/path/to/waybar-apcupsd/ups-status.sh | python -m json.tool
+/path/to/ups-status.sh | python -m json.tool
 ```
-
-## Tests
-
-The test suite mocks `apcaccess` via `PATH` and only emits the fields this script reads: `STATUS`, `BCHARGE`, `LOADPCT`, `TIMELEFT`, and `LINEV`.
-
-```bash
-python3 -m unittest discover -s tests
-```
-
-This requires Python 3, but does not require a running UPS or `apcupsd`.
-
-The same checks run in GitHub Actions on pushes to `main` and on pull requests.
 
 ### Debug logging
 
@@ -286,12 +308,30 @@ Logs are written to `/tmp/waybar-apcupsd.log` (override with `DEBUG_LOG`).
 
 ```bash
 # Enable logging for unknown statuses in Waybar config
-"exec": "DEBUG=1 /path/to/waybar-apcupsd/ups-status.sh"
+"exec": "DEBUG=1 /path/to/ups-status.sh"
 
 # Or test manually with full logging
-DEBUG=2 /path/to/waybar-apcupsd/ups-status.sh
+DEBUG=2 /path/to/ups-status.sh
 cat /tmp/waybar-apcupsd.log
 ```
+
+## Tests
+
+The test suite mocks `apcaccess` via `PATH` and only emits the fields this script reads: `STATUS`, `BCHARGE`, `LOADPCT`, `TIMELEFT`, and `LINEV`.
+
+```bash
+just test
+```
+
+This requires `just` and Python 3, but does not require a running UPS or `apcupsd`.
+
+Run the full local check suite with:
+
+```bash
+just check
+```
+
+The same lint and test checks run in GitHub Actions on pushes to `main` and on pull requests.
 
 ## AI Disclaimer
 

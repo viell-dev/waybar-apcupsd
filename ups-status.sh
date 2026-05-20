@@ -29,24 +29,122 @@ TEXT_ERROR="Error"
 TEXT_ALERT="Alert"
 TEXT_UNKNOWN="Unknown"
 
-# --- Fetch all fields in one call -----------------------------------------
+# --- Charge threshold settings -------------------------------------------
+# 0 disables the corresponding threshold.
+WARNING_CHARGE=${WARNING_CHARGE:-20}
+CRITICAL_CHARGE=${CRITICAL_CHARGE:-0}
 
-RAW=$(apcaccess status 2>/dev/null) || RAW=""
+json_escape() {
+    local value=$1
+    local char
+    local code_hex
+    local escape
+    local code
 
-if [[ -z "$RAW" ]]; then
-    printf '{"text": "%s", "alt": "alert", "tooltip": "UPS: Cannot communicate with apcupsd", "class": "critical", "percentage": 0}\n' "$TEXT_ERROR"
+    value=${value//\\/\\\\}
+    value=${value//\"/\\\"}
+    value=${value//$'\b'/\\b}
+    value=${value//$'\f'/\\f}
+    value=${value//$'\n'/\\n}
+    value=${value//$'\r'/\\r}
+    value=${value//$'\t'/\\t}
+
+    for code in {1..31}; do
+        case "$code" in
+            8|9|10|12|13)
+                continue
+                ;;
+        esac
+
+        printf -v code_hex "%02x" "$code"
+        printf -v char "%b" "\\x$code_hex"
+        printf -v escape '\\u%04x' "$code"
+        value=${value//"$char"/"$escape"}
+    done
+
+    printf '%s' "$value"
+}
+
+emit_error() {
+    local tooltip=$1
+    local text
+
+    text=$(json_escape "$TEXT_ERROR")
+    tooltip=$(json_escape "$tooltip")
+    printf '{"text": "%s", "alt": "alert", "tooltip": "%s", "class": "critical", "percentage": 0}\n' "$text" "$tooltip"
+}
+
+if [[ ! "$WARNING_CHARGE" =~ ^[0-9]{1,3}$ || ! "$CRITICAL_CHARGE" =~ ^[0-9]{1,3}$ ]]; then
+    emit_error "UPS: Invalid charge threshold config. WARNING_CHARGE and CRITICAL_CHARGE must be integers from 0 to 100."
     exit 0
 fi
 
-get_field() {
-    echo "$RAW" | awk -F': ' -v key="$1" '$1 ~ "^"key" *$" { gsub(/^ +| +$/, "", $2); print $2; exit }'
-}
+WARNING_CHARGE=$((10#$WARNING_CHARGE))
+CRITICAL_CHARGE=$((10#$CRITICAL_CHARGE))
 
-STATUS=$(get_field STATUS)
-BCHARGE=$(get_field BCHARGE)
-LOADPCT=$(get_field LOADPCT)
-TIMELEFT=$(get_field TIMELEFT)
-LINEV=$(get_field LINEV)
+if (( WARNING_CHARGE > 100 || CRITICAL_CHARGE > 100 )); then
+    emit_error "UPS: Invalid charge threshold config. WARNING_CHARGE and CRITICAL_CHARGE must be integers from 0 to 100."
+    exit 0
+fi
+
+if (( WARNING_CHARGE != 0 && CRITICAL_CHARGE >= WARNING_CHARGE )); then
+    emit_error "UPS: Invalid charge threshold config. CRITICAL_CHARGE must be lower than WARNING_CHARGE, or WARNING_CHARGE must be 0."
+    exit 0
+fi
+
+# --- Fetch all fields in one call -----------------------------------------
+
+if ! RAW=$(apcaccess 2>&1); then
+    APCACCESS_ERROR=$RAW
+    RAW=""
+else
+    APCACCESS_ERROR=""
+fi
+
+if [[ -z "$RAW" ]]; then
+    if [[ -n "$APCACCESS_ERROR" ]]; then
+        emit_error "UPS: Cannot query apcupsd"$'\n'"${APCACCESS_ERROR}"
+        exit 0
+    fi
+
+    emit_error "UPS: apcaccess returned no status data"
+    exit 0
+fi
+
+STATUS=""
+BCHARGE=""
+LOADPCT=""
+TIMELEFT=""
+LINEV=""
+HAS_STATUS_FIELD=0
+
+while IFS=$'\t' read -r key value; do
+    case "$key" in
+        STATUS)
+            STATUS=$value
+            HAS_STATUS_FIELD=1
+            ;;
+        BCHARGE) BCHARGE=$value ;;
+        LOADPCT) LOADPCT=$value ;;
+        TIMELEFT) TIMELEFT=$value ;;
+        LINEV) LINEV=$value ;;
+    esac
+done < <(
+    awk -F':' '
+        $1 ~ /^ *(STATUS|BCHARGE|LOADPCT|TIMELEFT|LINEV) *$/ {
+            key = $1
+            value = substr($0, index($0, ":") + 1)
+            gsub(/^ +| +$/, "", key)
+            gsub(/^ +| +$/, "", value)
+            print key "\t" value
+        }
+    ' <<< "$RAW"
+)
+
+if (( HAS_STATUS_FIELD == 0 )); then
+    emit_error "UPS: apcaccess returned malformed status data (missing STATUS field)"
+    exit 0
+fi
 
 # Strip units (e.g. "100.0 Percent" -> "100.0")
 BCHARGE=${BCHARGE%% *}
@@ -55,12 +153,20 @@ TIMELEFT=${TIMELEFT%% *}
 LINEV=${LINEV%% *}
 
 # Integer charge for percentage output
-CHARGE_INT=${BCHARGE%%.*}
-CHARGE_INT=${CHARGE_INT//[^0-9]/}
-if [[ -n "$CHARGE_INT" ]]; then
-    CHARGE_INT=$((10#$CHARGE_INT))
-else
-    CHARGE_INT=0
+CHARGE_RAW=$BCHARGE
+CHARGE_INT=0
+CHARGE_VALID=0
+if [[ "$BCHARGE" =~ ^-?[0-9]+([.][0-9]+)?$ ]]; then
+    CHARGE_INT=${BCHARGE%%.*}
+    CHARGE_VALID=1
+    if [[ "$CHARGE_INT" == -* ]]; then
+        CHARGE_INT=0
+    else
+        CHARGE_INT=$((10#$CHARGE_INT))
+        if (( CHARGE_INT > 100 )); then
+            CHARGE_INT=100
+        fi
+    fi
 fi
 
 # --- Determine state from compound STATUS field --------------------------
@@ -166,13 +272,12 @@ fi
 if has_flag ONBATT; then
     POWER_STATE="on-battery"
     ALT="discharging"
-    if (( CHARGE_INT <= 20 )); then
+    if (( CHARGE_VALID == 1 && CRITICAL_CHARGE != 0 && CHARGE_INT <= CRITICAL_CHARGE )); then
         CLASS="critical"
-        if ! has_flag LOWBATT; then
-            WARNINGS+=("LOW BATTERY")
-        fi
-    elif (( CHARGE_INT <= 50 )); then
+        WARNINGS+=("Battery charge at or below critical threshold")
+    elif (( CHARGE_VALID == 1 && WARNING_CHARGE != 0 && CHARGE_INT <= WARNING_CHARGE )); then
         CLASS="warning"
+        WARNINGS+=("Battery charge at or below warning threshold")
     else
         CLASS="on-battery"
     fi
@@ -253,6 +358,10 @@ elif [[ "$POWER_STATE" == "unknown" && "$HAS_KNOWN_FLAG" -eq 0 ]]; then
     [[ "$DEBUG" -eq 1 ]] && debug_log
 fi
 
+if (( CHARGE_VALID == 0 )); then
+    INFO_MESSAGES+=("Battery charge unavailable.")
+fi
+
 if [[ -n "$ALT_OVERRIDE" ]]; then
     ALT=$ALT_OVERRIDE
 fi
@@ -262,22 +371,48 @@ fi
 
 # --- Build output ---------------------------------------------------------
 
-TEXT="${FALLBACK_TEXT:-${CHARGE_INT}%}"
+if [[ -n "$FALLBACK_TEXT" ]]; then
+    TEXT=$FALLBACK_TEXT
+elif (( CHARGE_VALID == 1 )); then
+    TEXT="${CHARGE_INT}%"
+else
+    TEXT="$TEXT_UNKNOWN"
+fi
+
+TOOLTIP=""
+
+append_tooltip_line() {
+    local line=$1
+
+    if [[ -n "$TOOLTIP" ]]; then
+        TOOLTIP+=$'\n'
+    fi
+
+    TOOLTIP+="$line"
+}
 
 # Tooltip with full details
 # Note: ⚠ is U+26A0 (Warning Sign), ℹ is U+2139 (Information Source)
-TOOLTIP=""
 for warning in "${WARNINGS[@]}"; do
-    TOOLTIP="${TOOLTIP}⚠ ${warning}\n"
+    append_tooltip_line "⚠ ${warning}"
 done
 for info in "${INFO_MESSAGES[@]}"; do
-    TOOLTIP="${TOOLTIP}ℹ ${info}\n"
+    append_tooltip_line "ℹ ${info}"
 done
-TOOLTIP="${TOOLTIP}Status: ${STATUS}\nBattery: ${BCHARGE}%\nLoad: ${LOADPCT}%\nRuntime: ${TIMELEFT} min\nLine: ${LINEV} V"
+append_tooltip_line "Status: ${STATUS}"
+if (( CHARGE_VALID == 1 )); then
+    append_tooltip_line "Battery: ${CHARGE_INT}%"
+elif [[ -n "$CHARGE_RAW" ]]; then
+    append_tooltip_line "Battery: ${CHARGE_RAW}"
+else
+    append_tooltip_line "Battery: unavailable"
+fi
+append_tooltip_line "Load: ${LOADPCT}%"
+append_tooltip_line "Runtime: ${TIMELEFT} min"
+append_tooltip_line "Line: ${LINEV} V"
 
-# Escape quotes for JSON
-TEXT="${TEXT//\"/\\\"}"
-TOOLTIP="${TOOLTIP//\"/\\\"}"
+TEXT=$(json_escape "$TEXT")
+TOOLTIP=$(json_escape "$TOOLTIP")
 
 printf '{"text": "%s", "alt": "%s", "tooltip": "%s", "class": "%s", "percentage": %d}\n' \
     "$TEXT" "$ALT" "$TOOLTIP" "$CLASS" "$CHARGE_INT"
