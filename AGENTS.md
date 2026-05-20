@@ -12,54 +12,15 @@ This file is the canonical agent guidance for this repository. `CLAUDE.md` deleg
 - User-facing docs: `README.md`
 - Release history: `CHANGELOG.md`
 
-The script runs `apcaccess status`, reads a small subset of fields, and emits Waybar JSON:
-
-```json
-{"text":"...","alt":"...","tooltip":"...","class":"...","percentage":42}
-```
-
-## Behavior Notes
-
-The script currently reads only these `apcaccess status` fields:
-
-- `STATUS`
-- `BCHARGE`
-- `LOADPCT`
-- `TIMELEFT`
-- `LINEV`
-
-`STATUS` may contain multiple flags. The resolver is context-aware:
-
-- Determine the primary power state first: `ONLINE`, `ONBATT`, or unknown
-- Apply warning and critical modifiers on top of that power state
-- Keep informational flags in the tooltip only
-
-Important expectations:
-
-- `ONLINE LOWBATT` is `warning` with the `charging` icon
-- `ONBATT LOWBATT` is `critical` with the `discharging` icon
-- `COMMLOST` uses the `unknown` icon
-- `SHUTTING DOWN` and `NOBATT` use the `alert` icon
+For installation, configuration, output fields, CSS classes, status behavior, and troubleshooting, use `README.md` as the source of truth.
 
 ## Testing
 
-Run the unit test suite with:
-
-```bash
-python3 -m unittest discover -s tests -v
-```
-
-CI runs the same suite plus basic syntax checks in GitHub Actions.
+Use the test and check commands documented in `README.md`.
 
 The tests mock `apcaccess` by prepending a temporary script to `PATH`. Keep tests focused on the actual script contract rather than refactoring the shell implementation into a separate library.
 
-When behavior changes, update or add tests for:
-
-- mixed `STATUS` combinations
-- power-state precedence
-- icon override precedence
-- fallback text for error and unknown conditions
-- tooltip warning and informational lines
+When behavior changes, update or add focused tests and keep `README.md` and `CHANGELOG.md` in sync.
 
 ## Documentation And Release Hygiene
 
@@ -72,7 +33,7 @@ Keep these files in sync with behavior changes:
 Use `CHANGELOG.md` like this:
 
 - Add ongoing work under `## [Unreleased]`
-- Move those entries into `0.2.0`, `0.2.1`, etc. when tagged
+- Move those entries into the next version section when preparing or tagging a release
 - Keep historical entries concise and user-facing
 
 ## APCUPSd Reference
