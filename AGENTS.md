@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This file is the canonical agent guidance for this repository. `CLAUDE.md` delegates here.
+This file is the canonical agent guidance for this repository.
 
 ## Project Overview
 
